@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/**/*.spec.js"
+    "test": "node --test test/server.spec.js",
+    "test:dns": "node --test test/dns.spec.js",
+    "test:all": "node --test test/server.spec.js && node --test test/dns.spec.js"
   },
   "keywords": ["email", "testing", "smtp", "boozang"],
   "author": "Mats Ljunggren",

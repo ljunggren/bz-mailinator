@@ -125,6 +125,53 @@ app.delete('/api/inboxes', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Assertion API ───────────────────────────────────────────
+// GET /api/assert/:address?subject=...&from=...&contains=...&timeout=5000
+// Waits for a matching email, returns it or 408 on timeout
+app.get('/api/assert/:address', async (req, res) => {
+  const addr = getInbox(req.params.address);
+  const { subject, from, contains } = req.query;
+  const timeout = parseInt(req.query.timeout) || 5000;
+  const start = Date.now();
+
+  function find() {
+    const emails = inboxes[addr] || [];
+    return emails.find(e => {
+      if (subject && !e.subject.includes(subject)) return false;
+      if (from && !e.from.includes(from)) return false;
+      if (contains && !e.text.includes(contains) && !e.html.includes(contains)) return false;
+      return true;
+    });
+  }
+
+  // Poll until match or timeout
+  while (Date.now() - start < timeout) {
+    const match = find();
+    if (match) return res.json({ ok: true, email: match });
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  res.status(408).json({ ok: false, error: 'No matching email within ' + timeout + 'ms' });
+});
+
+// GET /api/assert/:address/count?min=1&max=5
+// Assert email count in inbox
+app.get('/api/assert/:address/count', (req, res) => {
+  const addr = getInbox(req.params.address);
+  const emails = inboxes[addr] || [];
+  const count = emails.length;
+  const min = req.query.min !== undefined ? parseInt(req.query.min) : null;
+  const max = req.query.max !== undefined ? parseInt(req.query.max) : null;
+
+  if (min !== null && count < min) {
+    return res.status(417).json({ ok: false, count, error: 'Expected at least ' + min + ' emails, got ' + count });
+  }
+  if (max !== null && count > max) {
+    return res.status(417).json({ ok: false, count, error: 'Expected at most ' + max + ' emails, got ' + count });
+  }
+  res.json({ ok: true, count });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', inboxes: Object.keys(inboxes).length, emails: emailCount });

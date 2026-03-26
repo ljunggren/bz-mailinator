@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BZ Mailinator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+    header { background: #2c3e50; color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 20px; font-weight: 600; }
+    header .actions { display: flex; gap: 8px; }
+    header button { background: #e74c3c; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    header button:hover { background: #c0392b; }
+    header .refresh { background: #3498db; }
+    header .refresh:hover { background: #2980b9; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; display: flex; gap: 20px; height: calc(100vh - 60px); }
+    .panel { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; display: flex; flex-direction: column; }
+    .inbox-list { width: 280px; flex-shrink: 0; }
+    .email-list { width: 320px; flex-shrink: 0; }
+    .email-view { flex: 1; min-width: 0; }
+    .panel-header { padding: 12px 16px; background: #ecf0f1; font-weight: 600; font-size: 14px; border-bottom: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; }
+    .panel-header .count { background: #3498db; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+    .panel-body { flex: 1; overflow-y: auto; }
+    .list-item { padding: 12px 16px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.15s; }
+    .list-item:hover { background: #f0f4f8; }
+    .list-item.active { background: #dbeafe; border-left: 3px solid #3498db; }
+    .list-item .addr { font-size: 14px; font-weight: 500; word-break: break-all; }
+    .list-item .meta { font-size: 12px; color: #888; margin-top: 2px; }
+    .list-item .subject { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+    .list-item .from { font-size: 12px; color: #666; }
+    .list-item .date { font-size: 11px; color: #999; margin-top: 2px; }
+    .email-detail { padding: 20px; }
+    .email-detail .field { margin-bottom: 8px; font-size: 13px; }
+    .email-detail .field label { font-weight: 600; color: #555; display: inline-block; width: 70px; }
+    .email-detail .subject-line { font-size: 18px; font-weight: 600; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #eee; }
+    .email-detail .body-tabs { display: flex; gap: 0; margin-bottom: 12px; }
+    .email-detail .body-tabs button { padding: 6px 16px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 13px; }
+    .email-detail .body-tabs button:first-child { border-radius: 4px 0 0 4px; }
+    .email-detail .body-tabs button:last-child { border-radius: 0 4px 4px 0; }
+    .email-detail .body-tabs button.active { background: #3498db; color: #fff; border-color: #3498db; }
+    .email-body { border: 1px solid #eee; border-radius: 4px; padding: 16px; min-height: 200px; font-size: 14px; line-height: 1.6; overflow: auto; }
+    .email-body.text { white-space: pre-wrap; font-family: monospace; font-size: 13px; }
+    .email-body iframe { width: 100%; min-height: 300px; border: none; }
+    .empty { padding: 40px; text-align: center; color: #999; font-size: 14px; }
+    .delete-btn { background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 3px; }
+    .delete-btn:hover { background: #fde8e8; }
+    .search { padding: 8px 12px; border-bottom: 1px solid #eee; }
+    .search input { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>BZ Mailinator</h1>
+    <div class="actions">
+      <button class="refresh" onclick="refresh()">Refresh</button>
+      <button onclick="deleteAll()">Delete All</button>
+    </div>
+  </header>
+  <div class="container">
+    <div class="panel inbox-list">
+      <div class="panel-header">Inboxes <span class="count" id="inbox-count">0</span></div>
+      <div class="search"><input type="text" placeholder="Filter inboxes..." oninput="filterInboxes(this.value)"></div>
+      <div class="panel-body" id="inboxes"></div>
+    </div>
+    <div class="panel email-list">
+      <div class="panel-header">Emails <span class="count" id="email-count">0</span></div>
+      <div class="panel-body" id="emails"></div>
+    </div>
+    <div class="panel email-view">
+      <div class="panel-header">Message</div>
+      <div class="panel-body" id="email-detail"><div class="empty">Select an email to view</div></div>
+    </div>
+  </div>
+
+  <script>
+    let allInboxes = {};
+    let currentInbox = null;
+    let currentEmails = [];
+    let currentEmail = null;
+    let viewMode = 'html';
+    let filterText = '';
+
+    async function api(path, method) {
+      const res = await fetch('/api' + path, { method: method || 'GET' });
+      return res.ok ? res.json() : null;
+    }
+
+    async function refresh() {
+      allInboxes = await api('/inboxes') || {};
+      renderInboxes();
+      if (currentInbox) loadInbox(currentInbox);
+    }
+
+    function filterInboxes(val) {
+      filterText = val.toLowerCase();
+      renderInboxes();
+    }
+
+    function renderInboxes() {
+      const el = document.getElementById('inboxes');
+      const addrs = Object.keys(allInboxes).filter(a => !filterText || a.includes(filterText)).sort();
+      document.getElementById('inbox-count').textContent = addrs.length;
+
+      if (addrs.length === 0) {
+        el.innerHTML = '<div class="empty">No inboxes</div>';
+        return;
+      }
+      el.innerHTML = addrs.map(addr =>
+        `<div class="list-item ${addr === currentInbox ? 'active' : ''}" onclick="loadInbox('${addr}')">
+          <div class="addr">${addr}</div>
+          <div class="meta">${allInboxes[addr]} email${allInboxes[addr] !== 1 ? 's' : ''}
+            <span class="delete-btn" onclick="event.stopPropagation();deleteInbox('${addr}')" title="Delete">&#x2715;</span>
+          </div>
+        </div>`
+      ).join('');
+    }
+
+    async function loadInbox(addr) {
+      currentInbox = addr;
+      currentEmails = await api('/inbox/' + encodeURIComponent(addr)) || [];
+      renderInboxes();
+      renderEmails();
+    }
+
+    function renderEmails() {
+      const el = document.getElementById('emails');
+      document.getElementById('email-count').textContent = currentEmails.length;
+
+      if (currentEmails.length === 0) {
+        el.innerHTML = '<div class="empty">No emails</div>';
+        return;
+      }
+      el.innerHTML = currentEmails.slice().reverse().map(e =>
+        `<div class="list-item ${currentEmail && currentEmail.id === e.id ? 'active' : ''}" onclick="viewEmail(${e.id})">
+          <div class="subject">${esc(e.subject || '(no subject)')}</div>
+          <div class="from">${esc(e.from)}</div>
+          <div class="date">${new Date(e.date).toLocaleString()}</div>
+        </div>`
+      ).join('');
+    }
+
+    async function viewEmail(id) {
+      currentEmail = await api('/email/' + id);
+      if (!currentEmail) return;
+      renderEmails();
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const e = currentEmail;
+      if (!e) return;
+      const el = document.getElementById('email-detail');
+      el.innerHTML = `
+        <div class="email-detail">
+          <div class="subject-line">${esc(e.subject || '(no subject)')}</div>
+          <div class="field"><label>From:</label> ${esc(e.from)}</div>
+          <div class="field"><label>To:</label> ${esc(e.to)}</div>
+          <div class="field"><label>Date:</label> ${new Date(e.date).toLocaleString()}</div>
+          <div class="body-tabs">
+            <button class="${viewMode === 'html' ? 'active' : ''}" onclick="setView('html')">HTML</button>
+            <button class="${viewMode === 'text' ? 'active' : ''}" onclick="setView('text')">Text</button>
+          </div>
+          <div class="email-body ${viewMode === 'text' ? 'text' : ''}" id="email-body"></div>
+        </div>
+      `;
+      const body = document.getElementById('email-body');
+      if (viewMode === 'html' && e.html) {
+        const iframe = document.createElement('iframe');
+        iframe.sandbox = 'allow-same-origin';
+        body.appendChild(iframe);
+        iframe.contentDocument.open();
+        iframe.contentDocument.write(e.html);
+        iframe.contentDocument.close();
+      } else {
+        body.textContent = e.text || '(empty)';
+        body.classList.add('text');
+      }
+    }
+
+    function setView(mode) {
+      viewMode = mode;
+      renderDetail();
+    }
+
+    async function deleteInbox(addr) {
+      await api('/inbox/' + encodeURIComponent(addr), 'DELETE');
+      if (currentInbox === addr) { currentInbox = null; currentEmails = []; currentEmail = null; }
+      refresh();
+    }
+
+    async function deleteAll() {
+      if (!confirm('Delete all emails?')) return;
+      await api('/inboxes', 'DELETE');
+      currentInbox = null; currentEmails = []; currentEmail = null;
+      document.getElementById('emails').innerHTML = '<div class="empty">No emails</div>';
+      document.getElementById('email-detail').innerHTML = '<div class="empty">Select an email to view</div>';
+      refresh();
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // Auto-refresh every 5s
+    setInterval(refresh, 5000);
+    refresh();
+  </script>
+</body>
+</html>

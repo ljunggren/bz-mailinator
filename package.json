@@ -1,0 +1,22 @@
+{
+  "name": "bz-mailinator",
+  "version": "1.0.0",
+  "description": "Lightweight email test server for Boozang test automation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "mocha test/**/*.spec.js"
+  },
+  "keywords": ["email", "testing", "smtp", "boozang"],
+  "author": "Mats Ljunggren",
+  "license": "MIT",
+  "dependencies": {
+    "smtp-server": "^3.13.0",
+    "mailparser": "^3.7.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "mocha": "^11.0.0",
+    "nodemailer": "^6.9.0"
+  }
+}

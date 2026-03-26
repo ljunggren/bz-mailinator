@@ -133,3 +133,88 @@ describe('Assert count API', () => {
     assert.strictEqual(body.count, 0);
   });
 });
+
+describe('Regex matching', () => {
+  it('matches subject by regex', async () => {
+    await sendMail({ to: 'rx1@test.com', subject: 'Invoice #1234' });
+
+    const { status, body } = await api('/api/assert/rx1@test.com?subject=/invoice.*%231234/i');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.ok, true);
+  });
+
+  it('matches body content by regex', async () => {
+    await sendMail({ to: 'rx2@test.com', subject: 'Code', text: 'Your code is ABC-9876' });
+
+    const { status, body } = await api('/api/assert/rx2@test.com?contains=/[A-Z]{3}-[0-9]{4}/');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.ok, true);
+  });
+
+  it('fails when regex does not match', async () => {
+    await sendMail({ to: 'rx3@test.com', subject: 'Hello' });
+
+    const { status } = await api('/api/assert/rx3@test.com?subject=/goodbye/i&timeout=500');
+    assert.strictEqual(status, 408);
+  });
+
+  it('falls back to substring when not a regex pattern', async () => {
+    await sendMail({ to: 'rx4@test.com', subject: 'Welcome aboard' });
+
+    const { status, body } = await api('/api/assert/rx4@test.com?subject=Welcome');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.ok, true);
+  });
+});
+
+describe('Link extraction', () => {
+  it('extracts links from assert response', async () => {
+    await sendMail({
+      to: 'link1@test.com', subject: 'Verify',
+      html: '<p>Click <a href="https://example.com/verify?token=abc123">here</a> to verify.</p>'
+    });
+
+    const { status, body } = await api('/api/assert/link1@test.com?subject=Verify');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.links.length, 1);
+    assert.strictEqual(body.links[0].url, 'https://example.com/verify?token=abc123');
+    assert.strictEqual(body.links[0].text, 'here');
+  });
+
+  it('extracts multiple links', async () => {
+    await sendMail({
+      to: 'link2@test.com', subject: 'Links',
+      html: '<a href="https://a.com">A</a> and <a href="https://b.com">B</a>'
+    });
+
+    const { status, body } = await api('/api/assert/link2@test.com?subject=Links');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.links.length, 2);
+  });
+
+  it('returns empty links for text-only email', async () => {
+    await sendMail({ to: 'link3@test.com', subject: 'Plain', text: 'no html' });
+
+    const { status, body } = await api('/api/assert/link3@test.com?subject=Plain');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.links.length, 0);
+  });
+
+  it('gets links from latest email endpoint', async () => {
+    await sendMail({
+      to: 'link4@test.com', subject: 'Reset',
+      html: '<a href="https://example.com/reset?t=xyz">Reset password</a>'
+    });
+
+    const { status, body } = await api('/api/inbox/link4@test.com/latest/links');
+    assert.strictEqual(status, 200);
+    assert.strictEqual(body.links.length, 1);
+    assert.strictEqual(body.links[0].url, 'https://example.com/reset?t=xyz');
+    assert.strictEqual(body.links[0].text, 'Reset password');
+  });
+
+  it('returns 404 for links on empty inbox', async () => {
+    const { status } = await api('/api/inbox/nobody@test.com/latest/links');
+    assert.strictEqual(status, 404);
+  });
+});

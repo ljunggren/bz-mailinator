@@ -125,9 +125,30 @@ app.delete('/api/inboxes', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Helpers ─────────────────────────────────────────────────
+function testMatch(pattern, value) {
+  if (pattern.startsWith('/') && pattern.lastIndexOf('/') > 0) {
+    const last = pattern.lastIndexOf('/');
+    const re = new RegExp(pattern.slice(1, last), pattern.slice(last + 1));
+    return re.test(value);
+  }
+  return value.includes(pattern);
+}
+
+function extractLinks(html) {
+  const links = [];
+  const re = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    links.push({ url: m[1], text: m[2].replace(/<[^>]+>/g, '').trim() });
+  }
+  return links;
+}
+
 // ── Assertion API ───────────────────────────────────────────
 // GET /api/assert/:address?subject=...&from=...&contains=...&timeout=5000
-// Waits for a matching email, returns it or 408 on timeout
+// Supports regex: subject=/welcome/i
+// Waits for a matching email, returns it (with links) or 408 on timeout
 app.get('/api/assert/:address', async (req, res) => {
   const addr = getInbox(req.params.address);
   const { subject, from, contains } = req.query;
@@ -137,9 +158,9 @@ app.get('/api/assert/:address', async (req, res) => {
   function find() {
     const emails = inboxes[addr] || [];
     return emails.find(e => {
-      if (subject && !e.subject.includes(subject)) return false;
-      if (from && !e.from.includes(from)) return false;
-      if (contains && !e.text.includes(contains) && !e.html.includes(contains)) return false;
+      if (subject && !testMatch(subject, e.subject)) return false;
+      if (from && !testMatch(from, e.from)) return false;
+      if (contains && !testMatch(contains, e.text) && !testMatch(contains, e.html)) return false;
       return true;
     });
   }
@@ -147,11 +168,24 @@ app.get('/api/assert/:address', async (req, res) => {
   // Poll until match or timeout
   while (Date.now() - start < timeout) {
     const match = find();
-    if (match) return res.json({ ok: true, email: match });
+    if (match) {
+      const links = extractLinks(match.html || '');
+      return res.json({ ok: true, email: match, links });
+    }
     await new Promise(r => setTimeout(r, 200));
   }
 
   res.status(408).json({ ok: false, error: 'No matching email within ' + timeout + 'ms' });
+});
+
+// GET /api/inbox/:address/latest/links — extract links from latest email
+app.get('/api/inbox/:address/latest/links', (req, res) => {
+  const addr = getInbox(req.params.address);
+  const emails = inboxes[addr] || [];
+  if (emails.length === 0) return res.status(404).json({ error: 'No emails' });
+  const latest = emails[emails.length - 1];
+  const links = extractLinks(latest.html || '');
+  res.json({ links });
 });
 
 // GET /api/assert/:address/count?min=1&max=5
